@@ -1,0 +1,99 @@
+/**
+ * Copyright (C) 2021 Bosch Sensortec GmbH
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ * 
+ */
+
+#include "Arduino.h"
+#include "bme68xLibrary.h"
+#include "SD.h"
+#include "String.h"
+
+#define PIN_CS A3
+
+Bme68x bme;
+String dataFileName;
+
+/**
+ * @brief Initializes the sensor and hardware settings
+ */
+void setup(void)
+{
+	SPI.begin();
+	SerialUSB.begin(115200);
+	
+  // Wait for serial port to connect
+	while (!SerialUSB) delay(10);
+
+
+  SerialUSB.print("Initializing SD card...");
+  if (!SD.begin(A4)) {
+    SerialUSB.println("Initialization failed!");
+    while (1);
+  }
+  SerialUSB.println("Initialization done.");
+
+  int senseFileIndex = 0;
+  while(SD.exists("sense" + String(senseFileIndex) + ".txt")) senseFileIndex++;
+
+  dataFileName = "sense" + String(senseFileIndex) + ".txt";
+
+	/* initializes the sensor based on SPI library */
+	bme.begin(PIN_CS, SPI);
+
+	if(bme.checkStatus())
+	{
+		if (bme.checkStatus() == BME68X_ERROR)
+		{
+			SerialUSB.println("Sensor error:" + bme.statusString());
+			return;
+		}
+		else if (bme.checkStatus() == BME68X_WARNING)
+		{
+			SerialUSB.println("Sensor Warning:" + bme.statusString());
+		}
+	}
+	
+	/* Set the default configuration for temperature, pressure and humidity */
+	bme.setTPH();
+
+	/* Set the heater configuration to 300 deg C for 100ms for Forced mode */
+	bme.setHeaterProf(300, 100);
+
+	SerialUSB.println("TimeStamp(ms), Temperature(deg C), Pressure(Pa), Humidity(%), Gas resistance(ohm), Status");
+}
+
+void loop(void)
+{
+	bme68xData data;
+
+	bme.setOpMode(BME68X_FORCED_MODE);
+	delayMicroseconds(bme.getMeasDur());
+
+	if (bme.fetchData()) {
+		bme.getData(data);
+      
+    File dataFile = SD.open(dataFileName, FILE_WRITE);
+
+    // if the file opened okay, write to it:
+    if (dataFile) {
+      SerialUSB.print("Writing to file...");
+
+      dataFile.print(String(millis()) + ", ");
+      dataFile.print(String(data.temperature) + ", ");
+      dataFile.print(String(data.pressure) + ", ");
+      dataFile.print(String(data.humidity) + ", ");
+      dataFile.print(String(data.gas_resistance) + ", ");
+      dataFile.println(data.status, HEX);
+
+      // close the file:
+      dataFile.close();
+      SerialUSB.println("done.");
+    } else {
+      // if the file didn't open, print an error:
+      SerialUSB.println("error opening file");
+    }
+		
+	}
+}
